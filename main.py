@@ -66,22 +66,125 @@ from config import (
     RAG_HOST,
     RAG_PORT,
     VectorDBType,
-    # RAG_EMBEDDING_MODEL,
-    # RAG_EMBEDDING_MODEL_DEVICE_TYPE,
-    # RAG_TEMPLATE,
     VECTOR_DB_TYPE,
 )
 
+import openai  # Import openai
+import requests  # Import requests to send HTTP requests
+
+# Get the base URL from environment variables
+RAG_OPENAI_BASEURL = os.getenv("RAG_OPENAI_BASEURL", "https://api.openai.com/v1")
+
+# Store the original openai.Embedding.create method
+original_embedding_create = openai.Embedding.create
+
+def custom_embedding_create(*args, **kwargs):
+    if RAG_OPENAI_BASEURL == "https://api.predictionguard.com":
+        # Adjust the request to match Prediction Guard's expected format
+        api_key = kwargs.get("api_key", openai.api_key)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # Get the input texts
+        input_texts = kwargs.get("input")
+        if not input_texts:
+            raise ValueError("Input text is required.")
+        if not isinstance(input_texts, list):
+            input_texts = [input_texts]
+
+        # Prepare the input data
+        inputs = [{"text": text} for text in input_texts]
+
+        payload = {
+            "model": kwargs.get(
+                "model", os.getenv("OPENAI_MODEL_NAME", "bridgetower-large-itm-mlm-itc")
+            ),
+            "inputs": inputs,  # Ensure 'inputs' key is used
+        }
+
+        # Debug: Print the payload to check its content
+        logger.debug(f"Payload sent to Prediction Guard: {payload}")
+
+        # Send the request to Prediction Guard's API
+        response = requests.post(
+            f"{RAG_OPENAI_BASEURL}/embeddings",
+            headers=headers,
+            json=payload,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Error code: {response.status_code} - {response.text}")
+            raise Exception(
+                f"Prediction Guard API request failed with status {response.status_code}: {response.text}"
+            )
+
+        result = response.json()
+
+        # Debug: Print the response to check its content
+        logger.debug(f"Response from Prediction Guard: {result}")
+
+        # Adjust the response format to match OpenAI's response format
+        data = []
+        for item in result.get("data", []):
+            if item.get("status") == "success":
+                data.append({
+                    "object": "embedding",
+                    "embedding": item["embedding"],
+                    "index": item["index"],
+                })
+            else:
+                logger.error(
+                    f"Embedding failed for index {item['index']}: {item.get('error', 'Unknown error')}"
+                )
+
+        # Construct the final response
+        return {
+            "data": data,
+            "model": result.get("model", payload["model"]),
+            "object": "list",  # OpenAI uses 'list' as the object type
+        }
+    else:
+        # Call the original openai.Embedding.create method
+        return original_embedding_create(*args, **kwargs)
+
+# Monkey-patch the openai.Embedding.create method
+openai.Embedding.create = custom_embedding_create
+
+# Import OpenAIEmbeddings and create the custom class
+from langchain.embeddings.openai import OpenAIEmbeddings
+
+class CustomOpenAIEmbeddings(OpenAIEmbeddings):
+    def embed_query(self, text: str) -> List[float]:
+        if RAG_OPENAI_BASEURL == "https://api.predictionguard.com":
+            # Use raw text without tokenization
+            return self._embedding_func(texts=[text])[0]
+        else:
+            return super().embed_query(text)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if RAG_OPENAI_BASEURL == "https://api.predictionguard.com":
+            # Use raw text without tokenization
+            # Split texts into batches if necessary
+            return self._embedding_func(texts=texts)
+        else:
+            return super().embed_documents(texts)
+
+# Initialize the embedding function
+embedding_function = CustomOpenAIEmbeddings()
+
+# Update your vector store to use the custom embedding function
+vector_store.embedding_function = embedding_function
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic goes here
-    if VECTOR_DB_TYPE == "pgvector":
+    if VECTOR_DB_TYPE == VectorDBType.PGVECTOR:
         await PSQLDatabase.get_pool()  # Initialize the pool
         await ensure_custom_id_index_on_embedding()
 
     yield
-
 
 app = FastAPI(lifespan=lifespan)
 
@@ -101,7 +204,6 @@ app.state.CHUNK_SIZE = CHUNK_SIZE
 app.state.CHUNK_OVERLAP = CHUNK_OVERLAP
 app.state.PDF_EXTRACT_IMAGES = PDF_EXTRACT_IMAGES
 
-
 @app.get("/ids")
 async def get_all_ids():
     try:
@@ -114,7 +216,6 @@ async def get_all_ids():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 def isHealthOK():
     if VECTOR_DB_TYPE == VectorDBType.PGVECTOR:
         return pg_health_check()
@@ -123,7 +224,6 @@ def isHealthOK():
     else:
         return True
 
-
 @app.get("/health")
 async def health_check():
     if await isHealthOK():
@@ -131,9 +231,8 @@ async def health_check():
     else:
         return {"status": "DOWN"}, 503
 
-
-@app.get("/documents", response_model=list[DocumentResponse])
-async def get_documents_by_ids(ids: list[str] = Query(...)):
+@app.get("/documents", response_model=List[DocumentResponse])
+async def get_documents_by_ids(ids: List[str] = Query(...)):
     try:
         if isinstance(vector_store, AsyncPgVector):
             existing_ids = await vector_store.get_all_ids()
@@ -158,7 +257,6 @@ async def get_documents_by_ids(ids: list[str] = Query(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.delete("/documents")
 async def delete_documents(document_ids: List[str] = Body(...)):
     try:
@@ -178,7 +276,6 @@ async def delete_documents(document_ids: List[str] = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/query")
 async def query_embeddings_by_file_id(body: QueryRequestBody, request: Request):
@@ -223,11 +320,9 @@ async def query_embeddings_by_file_id(body: QueryRequestBody, request: Request):
         logger.error(e)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 def generate_digest(page_content: str):
     hash_obj = hashlib.md5(page_content.encode())
     return hash_obj.hexdigest()
-
 
 async def store_data_in_vector_db(
     data: Iterable[Document],
@@ -273,7 +368,6 @@ async def store_data_in_vector_db(
         logger.error(e)
         return {"message": "An error occurred while adding documents.", "error": str(e)}
 
-
 def get_loader(filename: str, file_content_type: str, filepath: str):
     file_ext = filename.split(".")[-1].lower()
     known_type = True
@@ -315,7 +409,6 @@ def get_loader(filename: str, file_content_type: str, filepath: str):
 
     return loader, known_type, file_ext
 
-
 @app.post("/local/embed")
 async def embed_local_file(document: StoreDocument, request: Request):
 
@@ -332,7 +425,7 @@ async def embed_local_file(document: StoreDocument, request: Request):
         user_id = request.state.user.get("id")
 
     try:
-        loader, known_type = get_loader(
+        loader, known_type, _ = get_loader(
             document.filename, document.file_content_type, document.filepath
         )
         data = loader.load()
@@ -363,7 +456,6 @@ async def embed_local_file(document: StoreDocument, request: Request):
                 detail=ERROR_MESSAGES.DEFAULT(e),
             )
 
-
 @app.post("/embed")
 async def embed_file(
     request: Request, file_id: str = Form(...), file: UploadFile = File(...)
@@ -383,7 +475,10 @@ async def embed_file(
     try:
         async with aiofiles.open(temp_file_path, "wb") as temp_file:
             chunk_size = 64 * 1024  # 64 KB
-            while content := await file.read(chunk_size):
+            while True:
+                content = await file.read(chunk_size)
+                if not content:
+                    break
                 await temp_file.write(content)
     except Exception as e:
         raise HTTPException(
@@ -438,7 +533,6 @@ async def embed_file(
         "known_type": known_type,
     }
 
-
 @app.get("/documents/{id}/context")
 async def load_document_context(id: str):
     ids = [id]
@@ -470,7 +564,6 @@ async def load_document_context(id: str):
             detail=ERROR_MESSAGES.DEFAULT(e),
         )
 
-
 @app.post("/embed-upload")
 async def embed_file_upload(
     request: Request, file_id: str = Form(...), uploaded_file: UploadFile = File(...)
@@ -492,7 +585,7 @@ async def embed_file_upload(
         )
 
     try:
-        loader, known_type = get_loader(
+        loader, known_type, _ = get_loader(
             uploaded_file.filename, uploaded_file.content_type, temp_file_path
         )
 
@@ -519,7 +612,6 @@ async def embed_file_upload(
         "filename": uploaded_file.filename,
         "known_type": known_type,
     }
-
 
 @app.post("/query_multiple")
 async def query_embeddings_by_file_ids(body: QueryMultipleBody):
@@ -550,7 +642,6 @@ async def query_embeddings_by_file_ids(body: QueryMultipleBody):
         return documents
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 if debug_mode:
     app.include_router(router=pgvector_router)
