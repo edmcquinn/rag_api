@@ -235,9 +235,11 @@ async def store_data_in_vector_db(
     user_id: str = "",
     clean_content: bool = False,
 ) -> bool:
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=app.state.CHUNK_SIZE, chunk_overlap=app.state.CHUNK_OVERLAP
-    )
+    text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+    encoding_name="gpt2",
+    chunk_size=app.state.CHUNK_SIZE,
+    chunk_overlap=app.state.CHUNK_OVERLAP
+)
     documents = text_splitter.split_documents(data)
 
     # If `clean_content` is True, clean the page_content of each document (remove null bytes)
