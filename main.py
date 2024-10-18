@@ -236,7 +236,7 @@ async def store_data_in_vector_db(
     clean_content: bool = False,
 ) -> bool:
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=app.state.CHUNK_SIZE, chunk_overlap=app.state.CHUNK_OVERLAP
+        chunk_size=500, chunk_overlap=25
     )
     documents = text_splitter.split_documents(data)
 

@@ -183,6 +183,7 @@ def init_embeddings(provider, model):
             openai_api_base=RAG_OPENAI_BASEURL,
             openai_proxy=RAG_OPENAI_PROXY,
             check_embedding_ctx_length=False
+            tiktoken_enabled=False
         )
     elif provider == EmbeddingsProvider.AZURE:
         from langchain_openai import AzureOpenAIEmbeddings
