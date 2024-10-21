@@ -1,4 +1,10 @@
-﻿# ID-based RAG FastAPI
+
+ Don't use this repo. Use the orginal one. This just allows me to use an openai-like api instead of openai. 
+ 
+ 
+ 
+ 
+# ID-based RAG FastAPI
 
 ## Overview
 This project integrates Langchain with FastAPI in an Asynchronous, Scalable manner, providing a framework for document indexing and retrieval, using PostgreSQL/pgvector.
