@@ -1,5 +1,5 @@
 
- Don't use this repo. Use the orginal one. This just allows me to use an openai-like api instead of openai. 
+ Don't use this repo. Use the orginal one. This just allows me to use an openai-like api instead of openai. Please see https://librechat.ai/ with any questions.
  
  
  
