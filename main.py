@@ -2,6 +2,8 @@ import os
 import hashlib
 import aiofiles
 import aiofiles.os
+import ocrmypdf 
+import traceback
 from typing import Iterable, List
 from shutil import copyfileobj
 
@@ -71,6 +73,34 @@ from config import (
     # RAG_TEMPLATE,
     VECTOR_DB_TYPE,
 )
+
+def apply_ocr(file_path: str) -> str:
+    """
+    Apply OCR to a PDF file, forcibly reprocessing all pages and overwriting the original file.
+    Returns the path to the OCR-processed file.
+    """
+    ocr_output_path = file_path + "_ocr"
+
+    try:
+        ocrmypdf.ocr(
+            file_path,
+            ocr_output_path,
+            force_ocr=True,    # Rasterize pages and discard existing text
+            output_type="pdf",  # Produce a standard PDF to avoid Ghostscript
+            # Additional options if needed
+        )
+        os.replace(ocr_output_path, file_path)
+    except Exception as e:
+        logger.error(f"OCR processing failed: {str(e)}\n{traceback.format_exc()}")
+        if os.path.exists(ocr_output_path):
+            os.remove(ocr_output_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OCR processing failed: {str(e)}"
+        )
+    return file_path
+
+
 
 
 @asynccontextmanager
@@ -281,6 +311,11 @@ def get_loader(filename: str, file_content_type: str, filepath: str):
     known_type = True
 
     if file_ext == "pdf":
+        # Apply OCR and overwrite the original file
+        try:
+            apply_ocr(filepath)  # The filepath remains the same
+        except HTTPException as e:
+            raise e  # Re-raise the exception
         loader = PyPDFLoader(filepath, extract_images=app.state.PDF_EXTRACT_IMAGES)
     elif file_ext == "csv":
         loader = CSVLoader(filepath)

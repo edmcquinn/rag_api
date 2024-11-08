@@ -7,8 +7,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     pandoc \
     netcat-openbsd \
-    libgl1-mesa-glx \  
+    libgl1-mesa-glx \
     libglib2.0-0 \
+    tesseract-ocr \
+    ghostscript \
+    jbig2dec \
+    pngquant \
+    unpaper \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.lite.txt .
